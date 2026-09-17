@@ -1,0 +1,4 @@
+__pycache__/
+*.calendar_map.json
+*.calendar_plan.json
+*.ics
