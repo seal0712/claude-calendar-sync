@@ -5,7 +5,7 @@ calendar-sync：把專案的 ics 檔與 Google 日曆對帳。
   python sync_plan.py plan   <檔案.ics>                  列出差異（新增／修改／刪除），並輸出 plan JSON
   python sync_plan.py commit <檔案.ics> <results.json>   寫入成功後，把 event id 與指紋登記進對照表
   python sync_plan.py check  <檔案.ics> [--today YYYY-MM-DD] [--done <已完成.json>]
-                                                        檢查日期：格式、文字週幾矛盾、同日到場、過期未確認、沒寫來源
+                                                        檢查日期：格式、文字週幾矛盾、同日到場、過期未確認、過期通知、沒寫來源
 
 --done 指向另一份「已勾掉」清單（JSON，key 是 UID；例如桌面寵物的 已完成.json），裡面的事件視為已確認。
 
@@ -280,7 +280,7 @@ def text_weekday_errors(e: dict) -> list[str]:
 def cmd_check(ics: Path, today: date, done_file: Path | None) -> None:
     events = parse_ics(ics)
     done_uids = set(json.loads(done_file.read_text(encoding="utf-8"))) if done_file else set()
-    fmt, wd_err, overdue, no_src = [], [], [], []
+    fmt, wd_err, overdue, past_info, no_src = [], [], [], [], []
     by_day: dict[date, list[dict]] = {}
     for e in events:
         label = f"{when(e)}  {e['summary']}"
@@ -294,8 +294,8 @@ def cmd_check(ics: Path, today: date, done_file: Path | None) -> None:
         if ACTION_PREFIX.match(e["summary"]) and PRESENCE.search(e["summary"]) or \
                 PRESENCE.search(e["summary"]) and not INFO.search(e["summary"]):
             by_day.setdefault(d, []).append(e)
-        if d < today and is_action(e["summary"]) and "✅" not in e["summary"] and e["uid"] not in done_uids:
-            overdue.append(e)
+        if d < today and "✅" not in e["summary"] and e["uid"] not in done_uids:
+            (overdue if is_action(e["summary"]) else past_info).append(e)
         if d >= today and not SOURCE.search(e.get("description", "")):
             no_src.append(label)
     same_day = []
@@ -312,7 +312,9 @@ def cmd_check(ics: Path, today: date, done_file: Path | None) -> None:
         ("文字與日期矛盾", wd_err, "回來源核對，改 ics"),
         ("同一天要到場的事", same_day, "請使用者確認只能去哪一個"),
         ("過期但沒確認做了沒", [f"{when(e)}  {e['summary']}   [UID {e['uid']}]" for e in overdue],
-         "問使用者：做了就在 SUMMARY 前加「✅ 已完成｜」；沒做就連同同校系後續事件一起刪"),
+         "問使用者：做了就刪；沒做就連同同校系後續事件一起刪；要留紀錄才在 SUMMARY 前加 ✅"),
+        ("已過去的通知類事件", [f"{when(e)}  {e['summary']}   [UID {e['uid']}]" for e in past_info],
+         "直接從 ics 刪掉，不用問"),
         ("沒寫來源（只列未來的事）", no_src, "要「檢查日期正不正確」時回簡章／官網核對，並把來源補進 DESCRIPTION"),
     ]
     found = False
@@ -324,7 +326,7 @@ def cmd_check(ics: Path, today: date, done_file: Path | None) -> None:
         for i in items:
             print(f"- {i}")
     if not found:
-        print("檢查通過：沒有格式問題、矛盾、同日到場、過期未確認、缺來源。")
+        print("檢查通過：沒有格式問題、矛盾、同日到場、過期事件、缺來源。")
 
 
 def main() -> None:
